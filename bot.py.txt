@@ -1,0 +1,151 @@
+トリブジョン・プロ 💀, [05.01.2026 17:50]
+from aiogram import Bot, Dispatcher, executor, types
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton, ReplyKeyboardMarkup
+import sqlite3
+import os
+from datetime import datetime
+
+BOT_TOKEN = os.getenv("8473286959:AAHmhC7S0260_FySK2oWfpS78PB9_-7rmDs")
+
+ADMIN_IDS = [7723504118]  # <-- KEYIN O'ZGARTIRASAN
+FORCE_CHANNELS = ["https://t.me/+q_cduzR_ApBlZjhi", "https://t.me/+k2CoVZkEsb0xNjZi", "@gift_konkurs_game", "@gold_stars_tolov"]
+REQUEST_CHANNEL = "@gold_stars_ariza"
+PAYMENT_CHANNEL = "@gold_starsl_tolov"
+SUPPORT = "@mardonov_0215"
+
+MIN_GIFT = 25
+REFERAL_STARS = 2
+
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher(bot)
+
+db = sqlite3.connect("data.db")
+sql = db.cursor()
+
+sql.execute("""
+CREATE TABLE IF NOT EXISTS users(
+    id INTEGER PRIMARY KEY,
+    username TEXT,
+    stars INTEGER DEFAULT 0,
+    refs INTEGER DEFAULT 0,
+    lang TEXT DEFAULT 'uz'
+)
+""")
+sql.execute("""
+CREATE TABLE IF NOT EXISTS refs(
+    referrer INTEGER,
+    user INTEGER UNIQUE
+)
+""")
+sql.execute("""
+CREATE TABLE IF NOT EXISTS requests(
+    user INTEGER,
+    stars INTEGER,
+    status TEXT,
+    time TEXT
+)
+""")
+db.commit()
+
+def main_menu():
+    kb = ReplyKeyboardMarkup(resize_keyboard=True)
+    kb.add("⭐ Stars ishlash")
+    kb.add("👤 Profil", "🎁 Gift olish")
+    kb.add("📣 To‘lov kanali", "🛠 Support")
+    return kb
+
+async def check_sub(user_id):
+    for ch in FORCE_CHANNELS:
+        member = await bot.get_chat_member(ch, user_id)
+        if member.status == "left":
+            return False
+    return True
+
+@dp.message_handler(commands=["start"])
+async def start(msg: types.Message):
+    if not await check_sub(msg.from_user.id):
+        await msg.answer(
+            "❌ Avval quyidagi kanallarga obuna bo‘ling:\n" +
+            "\n".join(FORCE_CHANNELS)
+        )
+        return
+
+    sql.execute(
+        "INSERT OR IGNORE INTO users (id, username) VALUES (?,?)",
+        (msg.from_user.id, msg.from_user.username)
+    )
+    db.commit()
+
+    ref = msg.get_args()
+    if ref.isdigit():
+        sql.execute("INSERT OR IGNORE INTO refs VALUES (?,?)", (int(ref), msg.from_user.id))
+        if sql.rowcount:
+            sql.execute(
+                "UPDATE users SET stars=stars+?, refs=refs+1 WHERE id=?",
+                (REFERAL_STARS, int(ref))
+            )
+            db.commit()
+
+    await msg.answer("🔥 Stars botga xush kelibsiz!", reply_markup=main_menu())
+
+@dp.message_handler(lambda m: m.text == "👤 Profil")
+async def profile(msg: types.Message):
+    sql.execute("SELECT stars, refs FROM users WHERE id=?", (msg.from_user.id,))
+    s, r = sql.fetchone()
+    await msg.answer(
+        f"👤 @{msg.from_user.username}\n"
+        f"🆔 {msg.from_user.id}\n"
+        f"⭐ Stars: {s}\n"
+        f"👥 Referallar: {r}"
+    )
+
+@dp.message_handler(lambda m: m.text == "🎁 Gift olish")
+async def gift(msg: types.Message):
+    sql.execute("SELECT stars FROM users WHERE id=?", (msg.from_user.id,))
+    stars = sql.fetchone()[0]
+
+    if stars < MIN_GIFT:
+        await msg.answer(f"❌ Minimal yechish {MIN_GIFT} ⭐")
+        return
+
+    sql.execute("UPDATE users SET stars=stars-? WHERE id=?", (MIN_GIFT, msg.from_user.id))
+    sql.execute(
+        "INSERT INTO requests VALUES (?,?,?,?)",
+        (msg.from_user.id, MIN_GIFT, "pending", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    )
+    db.commit()
+
+    kb = InlineKeyboardMarkup().add(
+        InlineKeyboardButton("✅ Tasdiqlash", callback_data=f"ok_{msg.from_user.id}"),
+        InlineKeyboardButton("❌ Rad etish", callback_data=f"no_{msg.from_user.id}")
+    )
+
+    await bot.send_message(
+        REQUEST_CHANNEL,
+        f"🎁 YANGI GIFT ARIZA\n\n"
+        f"👤 @{msg.from_user.username}\n"
+        f"🆔 {msg.from_user.id}\n"
+        f"⭐ {MIN_GIFT} Stars",
+        reply_markup=kb
+    )
+    await msg.answer("✅ Ariza yuborildi")
+
+@dp.callback_query_handler(lambda c: c.data.startswith(("ok_", "no_")))
+async def admin(call: types.CallbackQuery):
+    if call.from_user.id not in ADMIN_IDS:
+        return
+
+    uid = int(call.data.split("_")[1])
+
+トリブジョン・プロ 💀, [05.01.2026 17:50]
+if call.data.startswith("ok_"):
+        await bot.send_message(uid, "🎉 Gift tasdiqlandi!")
+        await call.message.edit_text("✅ TASDIQLANDI")
+    else:
+        sql.execute("UPDATE users SET stars=stars+? WHERE id=?", (MIN_GIFT, uid))
+        db.commit()
+        await bot.send_message(uid, "❌ Ariza rad etildi")
+        await call.message.edit_text("❌ RAD ETILDI")
+
+if name == "main":
+    executor.start_polling(dp, skip_updates=True)
